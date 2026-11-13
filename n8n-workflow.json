@@ -1,0 +1,186 @@
+{
+  "name": "Student Performance Predictor (AI Automation Projects #24)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "618309dc-1d33-5f94-b6a5-8311a5f07449",
+      "name": "Schedule (Mondays 7am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "5744d89a-5df2-5275-b8e3-f1a58988521d",
+      "name": "Read current students",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1d89bc4b-834a-5ac6-851a-8c7dabb83f8b",
+      "name": "Test with sample data",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sample data from this repo. Click 'Test workflow' to run the whole flow on it.\nconst sample = [\n {\n  \"name\": \"Adaobi Eze\",\n  \"attendance\": \"95\",\n  \"assignments\": \"90\",\n  \"midterm\": \"78\",\n  \"study_hours\": \"8\"\n },\n {\n  \"name\": \"Musa Bello\",\n  \"attendance\": \"62\",\n  \"assignments\": \"40\",\n  \"midterm\": \"35\",\n  \"study_hours\": \"2\"\n },\n {\n  \"name\": \"Tolu Ajayi\",\n  \"attendance\": \"88\",\n  \"assignments\": \"75\",\n  \"midterm\": \"60\",\n  \"study_hours\": \"5\"\n },\n {\n  \"name\": \"Grace Otu\",\n  \"attendance\": \"70\",\n  \"assignments\": \"55\",\n  \"midterm\": \"38\",\n  \"study_hours\": \"3\"\n },\n {\n  \"name\": \"Ken Uche\",\n  \"attendance\": \"80\",\n  \"assignments\": \"85\",\n  \"midterm\": \"52\",\n  \"study_hours\": \"6\"\n }\n];\nreturn sample.map(json => ({ json }));"
+      },
+      "id": "6cd6f82c-11a9-55b5-9599-8ed80e25b59b",
+      "name": "Sample data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Student Performance Predictor: core logic (ported from main.py)\n\n// ---- input normaliser (works for Webhook, Form, WhatsApp, Gmail, Sheets and sample data)\nconst input = $input.all().flatMap(i => {\n  const j = i.json || {};\n  if (j.messages && Array.isArray(j.messages)) {           // WhatsApp Trigger\n    return j.messages.filter(m => m.text).map(m => ({ from: '+' + m.from, text: m.text.body }));\n  }\n  if (j.Subject !== undefined || j.From !== undefined) {     // Gmail Trigger (simple)\n    return [{ from: (j.From || '').replace(/.*<|>.*/g, ''), subject: j.Subject || '', body: j.snippet || j.text || '' }];\n  }\n  const b = (j.body !== undefined && j.headers !== undefined) ? j.body : j;   // Webhook wraps payload in body\n  if (Array.isArray(b)) return b;\n  if (b && Array.isArray(b.items)) return b.items;\n  return [b];\n});\n\n// Coefficients printed by `python main.py` - replace with the ones trained on your school's data.\nconst MODEL = { intercept: -12.618, attendance: 0.175, assignments: 0.198, midterm: 0.404, study_hours: 1.693 };\nconst PASS = 50, F = ['attendance', 'assignments', 'midterm', 'study_hours'];\nconst means = Object.fromEntries(F.map(f => [f, input.reduce((s, r) => s + Number(r[f]), 0) / input.length]));\nconst rows = input.map(r => { const p = MODEL.intercept + F.reduce((s, f) => s + MODEL[f] * Number(r[f]), 0);\n  const weakest = F.reduce((a, f) => ((Number(r[f]) - means[f]) / means[f] < (Number(r[a]) - means[a]) / means[a] ? f : a), F[0]);\n  return { name: r.name, predicted: Math.round(p * 10) / 10, at_risk: p < PASS, weakest_factor: weakest }; });\nconst risk = rows.filter(r => r.at_risk);\nreturn [{ json: { at_risk_count: risk.length, students: rows,\n  report: risk.length ? risk.map(r => `${r.name}: predicted ${r.predicted}, weakest factor ${r.weakest_factor}`).join('\\n') : 'No students at risk this week.' } }];\n"
+      },
+      "id": "e8741e2b-883e-58c3-881f-1910ddb2666c",
+      "name": "Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "formteachers@yourschool.edu.ng",
+        "subject": "={{ $json.at_risk_count }} students at risk this week",
+        "emailType": "text",
+        "message": "={{ $json.report }}",
+        "options": {}
+      },
+      "id": "85ce8d67-80f7-56af-9977-22fdb7c58136",
+      "name": "Email form teachers",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        120
+      ],
+      "webhookId": "85ce8d67-80f7-56af-9977-22fdb7c58136"
+    },
+    {
+      "parameters": {
+        "content": "## Student Performance Predictor\nFlags at-risk students by mid-term, while there's still time to help, with the reasons a teacher can act on.\n\nEvery Monday it reads current students (name, attendance, assignments, midterm, study_hours), predicts end-of-term scores with the linear model trained by `main.py` (paste YOUR coefficients from its output into MODEL), and emails form teachers the at-risk list with each student's weakest factor.\n\n**Try it:** click *Test workflow* to run on the sample data. Then connect your credentials on the output nodes and activate.\n\nCode and docs: github.com/Princewill106/student-performance-predictor",
+        "height": 340,
+        "width": 420,
+        "color": 5
+      },
+      "id": "3690a37e-dc59-5ba7-a6d9-b3f626264a05",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -460
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule (Mondays 7am)": {
+      "main": [
+        [
+          {
+            "node": "Read current students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with sample data": {
+      "main": [
+        [
+          {
+            "node": "Sample data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read current students": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample data": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logic": {
+      "main": [
+        [
+          {
+            "node": "Email form teachers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
